@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import { useVideoFilter, type GachaParams } from "@/hooks/useVideoFilter";
 
 // Types
 interface Preset {
@@ -8,23 +9,6 @@ interface Preset {
   name: string;
   category: "classic" | "mood" | "experimental";
   shader: string;
-}
-
-interface GachaState {
-  active: boolean;
-  locked: boolean;
-  params: {
-    invertR: boolean;
-    invertG: boolean;
-    invertB: boolean;
-    swapRG: boolean;
-    swapRB: boolean;
-    swapGB: boolean;
-    hueShift: number;
-    contrast: number;
-    saturation: number;
-    exposure: number;
-  };
 }
 
 // Presets data
@@ -44,112 +28,10 @@ const PRESETS: Preset[] = [
   // Experimental
   { id: "negative", name: "负片", category: "experimental", shader: "negative" },
   { id: "single-channel", name: "单色反转", category: "experimental", shader: "singleChannel" },
-  { id: "hue-chaos", name: "色相错乱", category: "experimental", shader: "hueChaos" },
-  { id: "rgb-shift", name: "RGB错位", category: "experimental", shader: "rgbShift" },
+  { id: "hueChaos", name: "色相错乱", category: "experimental", shader: "hueChaos" },
+  { id: "rgbShift", name: "RGB错位", category: "experimental", shader: "rgbShift" },
   { id: "pixel抽离", name: "像素抽离", category: "experimental", shader: "pixel抽离" },
 ];
-
-// Shader generators
-const SHADERS: Record<string, string> = {
-  cinematic: `
-    vec3 color = textureColor.rgb;
-    color = pow(color, vec3(0.9));
-    color = mix(color, vec3(dot(color, vec3(0.299, 0.587, 0.114))), -0.2);
-    color = mix(vec3(0.5), color, 1.2);
-    color = clamp(color, 0.0, 1.0);
-    gl_FragColor = vec4(color, textureColor.a);
-  `,
-  warm: `
-    vec3 color = textureColor.rgb;
-    color.r = color.r * 1.1;
-    color.g = color.g * 1.05;
-    color.b = color.b * 0.9;
-    gl_FragColor = vec4(color, textureColor.a);
-  `,
-  cool: `
-    vec3 color = textureColor.rgb;
-    color.r = color.r * 0.9;
-    color.g = color.g * 1.0;
-    color.b = color.b * 1.1;
-    gl_FragColor = vec4(color, textureColor.a);
-  `,
-  vintage: `
-    vec3 color = textureColor.rgb;
-    float gray = dot(color, vec3(0.299, 0.587, 0.114));
-    color = mix(vec3(gray), color, 0.7);
-    color = color * vec3(1.1, 1.0, 0.9);
-    gl_FragColor = vec4(color, textureColor.a);
-  `,
-  japanese: `
-    vec3 color = textureColor.rgb;
-    color = mix(color, vec3(1.05), 0.1);
-    color.g = color.g * 1.02;
-    gl_FragColor = vec4(color, textureColor.a);
-  `,
-  cyberpunk: `
-    vec3 color = textureColor.rgb;
-    color = pow(color, vec3(0.8));
-    color.r = color.r * 1.2;
-    color.b = color.b * 1.3;
-    gl_FragColor = vec4(color, textureColor.a);
-  `,
-  showa: `
-    vec3 color = textureColor.rgb;
-    color = mix(color, vec3(0.9, 0.85, 0.7), 0.3);
-    gl_FragColor = vec4(color, textureColor.a);
-  `,
-  gloomy: `
-    vec3 color = textureColor.rgb;
-    color = mix(color, vec3(0.3, 0.4, 0.35), 0.4);
-    gl_FragColor = vec4(color, textureColor.a);
-  `,
-  carnival: `
-    vec3 color = textureColor.rgb;
-    color = pow(color, vec3(1.1));
-    color.r = color.r * 1.15;
-    color.g = color.g * 1.1;
-    gl_FragColor = vec4(color, textureColor.a);
-  `,
-  morandi: `
-    vec3 color = textureColor.rgb;
-    float gray = dot(color, vec3(0.299, 0.587, 0.114));
-    color = mix(vec3(gray), color, 0.6);
-    gl_FragColor = vec4(color * 0.85, textureColor.a);
-  `,
-  negative: `
-    vec3 color = 1.0 - textureColor.rgb;
-    gl_FragColor = vec4(color, textureColor.a);
-  `,
-  singleChannel: `
-    vec3 color = textureColor.rgb;
-    float gray = dot(color, vec3(0.299, 0.587, 0.114));
-    gl_FragColor = vec4(vec3(gray, 1.0 - color.g, 1.0 - color.b), textureColor.a);
-  `,
-  hueChaos: `
-    vec3 color = textureColor.rgb;
-    float angle = 3.14159 * 2.0 / 3.0;
-    mat3 rot = mat3(
-      cos(angle), -sin(angle), 0.0,
-      sin(angle), cos(angle), 0.0,
-      0.0, 0.0, 1.0
-    );
-    color = rot * color;
-    gl_FragColor = vec4(color, textureColor.a);
-  `,
-  rgbShift: `
-    vec2 uv = vTextureCoord;
-    float offset = 0.01;
-    float r = texture2D(uSampler, uv + vec2(offset, 0.0)).r;
-    float g = texture2D(uSampler, uv).g;
-    float b = texture2D(uSampler, uv - vec2(offset, 0.0)).b;
-    gl_FragColor = vec4(r, g, b, textureColor.a);
-  `,
-  pixel抽离: `
-    vec3 color = textureColor.rgb;
-    color = floor(color * 4.0) / 4.0;
-    gl_FragColor = vec4(color, textureColor.a);
-  `,
-};
 
 export default function Home() {
   // State
@@ -160,16 +42,17 @@ export default function Home() {
   const [playing, setPlaying] = useState(false);
   const [volume, setVolume] = useState(1);
   const [activePreset, setActivePreset] = useState<string | null>(null);
-  const [gacha, setGacha] = useState<GachaState>({
+  const [gacha, setGacha] = useState<{
+    active: boolean;
+    locked: boolean;
+    params: GachaParams;
+  }>({
     active: false,
     locked: false,
     params: {
       invertR: false,
       invertG: false,
       invertB: false,
-      swapRG: false,
-      swapRB: false,
-      swapGB: false,
       hueShift: 0,
       contrast: 1,
       saturation: 1,
@@ -179,12 +62,19 @@ export default function Home() {
   const [exportFormat, setExportFormat] = useState<"mp4-h264" | "mp4-h265" | "webm">("mp4-h264");
   const [exportProgress, setExportProgress] = useState(0);
   const [isExporting, setIsExporting] = useState(false);
+  const [ffmpegLoading, setFfmpegLoading] = useState(false);
+  const [showWebGL, setShowWebGL] = useState(false);
 
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const glRef = useRef<WebGLRenderingContext | null>(null);
-  const programRef = useRef<WebGLProgram | null>(null);
+  const videoContainerRef = useRef<HTMLDivElement>(null);
+
+  // Use video filter hook
+  const { applyPreset, applyGacha, hasEffect, exportVideo } = useVideoFilter({
+    videoRef,
+    canvasRef,
+  });
 
   // Handle file drop
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -195,9 +85,10 @@ export default function Home() {
       setVideoSrc(url);
       setVideoFile(file);
       setActivePreset(null);
-      setGacha({ ...gacha, active: false });
+      setGacha({ active: false, locked: false, params: { invertR: false, invertG: false, invertB: false, hueShift: 0, contrast: 1, saturation: 1, exposure: 1 } });
+      setShowWebGL(false);
     }
-  }, [gacha]);
+  }, []);
 
   // Handle file select
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -207,7 +98,8 @@ export default function Home() {
       setVideoSrc(url);
       setVideoFile(file);
       setActivePreset(null);
-      setGacha({ ...gacha, active: false });
+      setGacha({ active: false, locked: false, params: { invertR: false, invertG: false, invertB: false, hueShift: 0, contrast: 1, saturation: 1, exposure: 1 } });
+      setShowWebGL(false);
     }
   };
 
@@ -225,7 +117,7 @@ export default function Home() {
   };
 
   // Play/Pause toggle
-  const togglePlay = () => {
+  const togglePlay = useCallback(() => {
     if (videoRef.current) {
       if (playing) {
         videoRef.current.pause();
@@ -234,7 +126,7 @@ export default function Home() {
       }
       setPlaying(!playing);
     }
-  };
+  }, [playing]);
 
   // Seek
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -246,21 +138,19 @@ export default function Home() {
   };
 
   // Apply preset shader
-  const applyPreset = (presetId: string) => {
+  const handleApplyPreset = (presetId: string) => {
     setActivePreset(presetId);
     setGacha({ ...gacha, active: false });
-    // Shader will be applied via WebGL in render
+    applyPreset(presetId);
+    setShowWebGL(true);
   };
 
   // Gacha roll
-  const rollGacha = () => {
-    const newParams = {
+  const rollGacha = useCallback(() => {
+    const newParams: GachaParams = {
       invertR: Math.random() > 0.7,
       invertG: Math.random() > 0.7,
       invertB: Math.random() > 0.7,
-      swapRG: Math.random() > 0.8,
-      swapRB: Math.random() > 0.8,
-      swapGB: Math.random() > 0.8,
       hueShift: Math.random() * 360,
       contrast: 0.5 + Math.random() * 1.5,
       saturation: 0.3 + Math.random() * 1.7,
@@ -268,7 +158,9 @@ export default function Home() {
     };
     setGacha({ active: true, locked: false, params: newParams });
     setActivePreset(null);
-  };
+    applyGacha(newParams);
+    setShowWebGL(true);
+  }, [applyGacha, gacha]);
 
   // Lock gacha
   const lockGacha = () => {
@@ -282,49 +174,54 @@ export default function Home() {
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
-  // Export video
-  const exportVideo = async () => {
+  // Toggle WebGL preview
+  const togglePreview = () => {
+    setShowWebGL(!showWebGL);
+  };
+
+  // Export video with FFmpeg
+  const handleExportVideo = async () => {
     if (!videoFile) return;
     setIsExporting(true);
     setExportProgress(0);
+    setFfmpegLoading(true);
 
-    // Simulate export progress
-    // In real implementation, this would use FFmpeg.wasm
-    for (let i = 0; i <= 100; i += 5) {
-      await new Promise((r) => setTimeout(r, 200));
-      setExportProgress(i);
+    try {
+      await exportVideo(videoFile, exportFormat, (p) => {
+        setExportProgress(p);
+      });
+    } catch (err) {
+      console.error("Export failed:", err);
+      alert("导出失败，请重试");
+    } finally {
+      setIsExporting(false);
+      setFfmpegLoading(false);
+      setExportProgress(0);
     }
-
-    // Create download link
-    const link = document.createElement("a");
-    link.href = videoSrc!;
-    const ext = exportFormat === "webm" ? "webm" : "mp4";
-    link.download = `video-${activePreset || "gacha"}.${ext}`;
-    link.click();
-
-    setIsExporting(false);
-    setExportProgress(0);
   };
 
-  // Get current shader
-  const getCurrentShader = () => {
-    if (activePreset) {
-      return SHADERS[activePreset] || SHADERS.cinematic;
-    }
-    if (gacha.active) {
-      return `
-        vec3 color = textureColor.rgb;
-        color = mix(vec3(0.5), color, uContrast);
-        color = mix(vec3(dot(color, vec3(0.299, 0.587, 0.114))), color, uSaturation);
-        color = color * uExposure;
-        if (uInvertR > 0.5) color.r = 1.0 - color.r;
-        if (uInvertG > 0.5) color.g = 1.0 - color.g;
-        if (uInvertB > 0.5) color.b = 1.0 - color.b;
-        gl_FragColor = vec4(color, textureColor.a);
-      `;
-    }
-    return "";
-  };
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!videoRef.current) return;
+      if (e.target instanceof HTMLInputElement) return;
+
+      switch (e.key) {
+        case " ":
+          e.preventDefault();
+          togglePlay();
+          break;
+        case "ArrowLeft":
+          videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 5);
+          break;
+        case "ArrowRight":
+          videoRef.current.currentTime = Math.min(videoRef.current.duration, videoRef.current.currentTime + 5);
+          break;
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [togglePlay]);
 
   return (
     <div className="min-h-screen bg-[#0f0f0f] text-white">
@@ -345,7 +242,7 @@ export default function Home() {
             {/* Upload Zone / Video Player */}
             {!videoSrc ? (
               <div
-                className={`upload-zone rounded-xl p-12 text-center ${!videoSrc ? "block" : "hidden"}`}
+                className="upload-zone rounded-xl p-12 text-center"
                 onDrop={handleDrop}
                 onDragOver={(e) => e.preventDefault()}
               >
@@ -363,18 +260,34 @@ export default function Home() {
                 </label>
               </div>
             ) : (
-              <div className="video-container">
+              <div className="video-container" ref={videoContainerRef}>
+                {/* Hidden video element for playback */}
                 <video
                   ref={videoRef}
                   src={videoSrc}
-                  className="w-full rounded-lg"
+                  className={showWebGL ? "hidden" : "w-full rounded-lg"}
                   onTimeUpdate={handleTimeUpdate}
                   onLoadedMetadata={handleLoadedMetadata}
                   onPlay={() => setPlaying(true)}
                   onPause={() => setPlaying(false)}
                   crossOrigin="anonymous"
                 />
-                <canvas ref={canvasRef} className="hidden" />
+                {/* WebGL canvas for filtered preview */}
+                <canvas
+                  ref={canvasRef}
+                  className={showWebGL ? "w-full rounded-lg" : "hidden"}
+                />
+                {/* Preview toggle */}
+                {hasEffect && (
+                  <div className="absolute top-3 right-3 z-10">
+                    <button
+                      onClick={togglePreview}
+                      className="px-3 py-1.5 bg-black/60 hover:bg-black/80 rounded-lg text-sm backdrop-blur-sm transition-colors"
+                    >
+                      {showWebGL ? "👁 原始预览" : "✨ 滤镜预览"}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -435,7 +348,8 @@ export default function Home() {
                       setVideoSrc(null);
                       setVideoFile(null);
                       setActivePreset(null);
-                      setGacha({ active: false, locked: false, params: { invertR: false, invertG: false, invertB: false, swapRG: false, swapRB: false, swapGB: false, hueShift: 0, contrast: 1, saturation: 1, exposure: 1 } });
+                      setGacha({ active: false, locked: false, params: { invertR: false, invertG: false, invertB: false, hueShift: 0, contrast: 1, saturation: 1, exposure: 1 } });
+                      setShowWebGL(false);
                     }}
                     className="px-4 py-2 bg-gray-700 hover:bg-red-600 rounded-lg transition-colors ml-auto"
                   >
@@ -475,19 +389,33 @@ export default function Home() {
                   ))}
                 </div>
 
+                {ffmpegLoading && (
+                  <div className="text-center text-sm text-indigo-400">
+                    <div className="mb-2">⏳ 正在加载 FFmpeg (~25MB)，请稍候...</div>
+                  </div>
+                )}
+
                 <button
-                  onClick={exportVideo}
-                  disabled={isExporting}
-                  className="w-full py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 rounded-lg font-medium transition-all disabled:opacity-50"
+                  onClick={handleExportVideo}
+                  disabled={isExporting || !hasEffect}
+                  className="w-full py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 rounded-lg font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isExporting ? (
-                    <span>导出中... {exportProgress}%</span>
+                    <span>
+                      {ffmpegLoading ? "加载中..." : `导出中... ${exportProgress}%`}
+                    </span>
                   ) : (
                     <span>💾 导出视频</span>
                   )}
                 </button>
 
-                {isExporting && (
+                {!hasEffect && (
+                  <p className="text-center text-xs text-gray-500">
+                    请先选择滤镜效果后再导出
+                  </p>
+                )}
+
+                {isExporting && !ffmpegLoading && (
                   <div className="progress-bar">
                     <div className="progress-bar-fill" style={{ width: `${exportProgress}%` }} />
                   </div>
@@ -506,15 +434,20 @@ export default function Home() {
               <button
                 onClick={rollGacha}
                 disabled={!videoSrc || (gacha.active && gacha.locked)}
-                className={`gacha-btn w-full py-4 rounded-xl font-bold text-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-                  !videoSrc ? "bg-gray-700" : ""
-                }`}
+                className={`gacha-btn w-full py-4 rounded-xl font-bold text-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed`}
               >
                 {!videoSrc ? "先上传视频" : gacha.locked ? "🔒 已锁定" : "🎲 抽卡!"}
               </button>
               {gacha.active && (
                 <div className="mt-4 space-y-2">
                   <p className="text-center text-sm text-gray-400 mb-3">随机效果已应用</p>
+                  <div className="text-xs text-gray-500 space-y-1 bg-[#252525] rounded-lg p-3">
+                    <div>对比度: {gacha.params.contrast.toFixed(2)}</div>
+                    <div>饱和度: {gacha.params.saturation.toFixed(2)}</div>
+                    <div>曝光: {gacha.params.exposure.toFixed(2)}</div>
+                    <div>色相偏移: {gacha.params.hueShift.toFixed(0)}°</div>
+                    <div>反转: {gacha.params.invertR ? "R " : ""}{gacha.params.invertG ? "G " : ""}{gacha.params.invertB ? "B" : ""}</div>
+                  </div>
                   <button
                     onClick={rollGacha}
                     className="w-full py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm"
@@ -545,7 +478,7 @@ export default function Home() {
                   {PRESETS.filter((p) => p.category === category).map((preset) => (
                     <button
                       key={preset.id}
-                      onClick={() => applyPreset(preset.id)}
+                      onClick={() => handleApplyPreset(preset.id)}
                       disabled={!videoSrc}
                       className={`preset-card p-3 text-left text-sm disabled:opacity-50 disabled:cursor-not-allowed ${
                         activePreset === preset.id
